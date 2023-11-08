@@ -1,0 +1,5 @@
+/.idea
+/data/
+/out/
+/plots/
+**/__pycache__/
