@@ -96,7 +96,7 @@ Promise.all([loadSvgPromise, overviewPromise]).then(() => {
     const patchesElement = document.getElementById('clickable-patches')
 
     patchesElement.addEventListener('mouseover', function (event) {
-        const targetIndex = event.target.getAttribute('index')
+        const targetIndex = parseInt(event.target.getAttribute('index'))
         traitInfoDiv.innerHTML = createTooltipContent(targetIndex)
         toggleHover(targetIndex)
     })
@@ -126,7 +126,11 @@ const toggleHover = (targetIndex) => {
 
     dehoverAll()
 
-    if (!selected.includes(targetIndex)) {
+    hovering.push(targetIndex)
+    if (selected.includes(targetIndex)) {
+        target.style['fill'] = 'blue'
+        target.style['fill-opacity'] = '0.25'
+    } else {
         hovering.push(targetIndex)
         target.style['fill'] = 'blue'
         target.style['fill-opacity'] = '0.1'
@@ -134,15 +138,20 @@ const toggleHover = (targetIndex) => {
 }
 
 // toggle trait yellow
-const toggleTrait = (eventOrIndex) => {
+const toggleTrait = (eventOrIndexOrName) => {
     let target, index
-    if (Number.isInteger(eventOrIndex)) {
-        index = eventOrIndex
-        target = ax4.children[eventOrIndex]
+    if (typeof eventOrIndexOrName === 'string') {
+        index = overviewDf.index.indexOf(eventOrIndexOrName)
+        if (index === -1) throw new Error(`Trait ${eventOrIndexOrName} not found in list of traits`)
+        target = ax4.children[index]
+    } else if (Number.isInteger(eventOrIndexOrName)) {
+        index = eventOrIndexOrName
+        target = ax4.children[eventOrIndexOrName]
     } else {
-        target = eventOrIndex.target
-        index = target.getAttribute('index')
+        target = eventOrIndexOrName.target
+        index = parseInt(target.getAttribute('index'))
     }
+
     if (selected.includes(index)) {
         for (var i = 0; i < selected.length; i++) {
             if (selected[i] === index) selected.splice(i, 1)
@@ -195,12 +204,14 @@ const deselectAll = () => {
 const dehoverAll = () => {
     while (hovering.length) {
         const targetIndex = hovering.pop()
-        if (selected.includes(targetIndex)) {
-            continue
-        }
         const target = ax4.children[targetIndex]
-        target.style['fill'] = 'rgb(255, 255, 255)'
-        target.style['fill-opacity'] = '0.000001'
+        if (selected.includes(targetIndex)) {
+            target.style['fill'] = 'yellow'
+            target.style['fill-opacity'] = '0.25'
+        } else {
+            target.style['fill'] = 'rgb(255, 255, 255)'
+            target.style['fill-opacity'] = '0.000001'
+        }
     }
 }
 

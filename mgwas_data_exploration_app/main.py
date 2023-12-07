@@ -19,6 +19,7 @@ def mgwas_app(
         workdir: str,
         is_numeric: bool,
         app_config: str | dict = {},
+        symmetric: bool = True,
         distance_metric: str = 'jaccard',
         linkage_method: str = 'ward',
         optimal_ordering: bool = True,
@@ -35,13 +36,14 @@ def mgwas_app(
     :param workdir: Folder where the mGWAS output must be located, exepect to find a folder 'traits' with subfolders for each trait
     :param is_numeric: whether the data is numeric or binary
     :param app_config: path to json file to overwrite the default app config
-    :param distance_metric: distance metric (binary data only; default: 'jaccard'); See metric in https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.distance.cdist.html
-    :param linkage_method: linkage method for clustering ['single', 'complete', 'average', 'weighted', 'ward', 'centroid', 'median']
+    :param symmetric: if True, correlated and anti-correlated traits will cluster together
+    :param distance_metric: distance metric (binary data only); See metric in https://docs.scipy.org/doc/scipy/reference/generated/scipy.spatial.distance.cdist.html
+    :param linkage_method: linkage method for clustering [single, complete, average, weighted, ward, centroid, median]
     :param optimal_ordering: whether to use optimal ordering; See scipy.cluster.hierarchy.linkage.
     :param corr_scale: whether to scale numeric data
-    :param corr_method: correlation method (numeric data only) ['pearson', 'kendall', 'spearman']
-    :param dendrogram_x_scale: x-axis scale for dendrogram ['linear', 'squareroot', 'log', 'symlog', 'logit']
-    :param scores_x_scale: x-axis scale for scores plot ['linear', 'manhattan']
+    :param corr_method: correlation method (numeric data only) [pearson, kendall, spearman]
+    :param dendrogram_x_scale: x-axis scale for dendrogram [linear, squareroot, log, symlog, logit]
+    :param scores_x_scale: x-axis scale for scores plot [linear, manhattan]
     """
     assert os.path.isdir(f'{workdir}/traits'), f'{workdir}/traits does not exist'
 
@@ -72,11 +74,11 @@ def mgwas_app(
     if is_numeric:
         logger.info(f'Calculating dendrogram based on correlation of numeric features...')
         linkage_matrix, labels = calculate_linkage_matrix_from_numeric(
-            summary_df, traits_df, corr_scale, corr_method, linkage_method, optimal_ordering)
+            summary_df, traits_df, symmetric, corr_scale, corr_method, linkage_method, optimal_ordering)
     else:
         logger.info(f'Calculating dendrogram based on binary data using {distance_metric} distances...')
         linkage_matrix, labels = calculate_linkage_matrix_from_binary(
-            summary_df, traits_df, distance_metric, linkage_method, optimal_ordering)
+            summary_df, traits_df, symmetric, distance_metric, linkage_method, optimal_ordering)
 
     # plot dendrogram
     logger.info('Calculating dendrogram plot...')
@@ -118,6 +120,7 @@ def copy_app(workdir: str, config: dict) -> dict:
 def calculate_linkage_matrix_from_binary(
         summary_df: pd.DataFrame,
         traits_df: pd.DataFrame,
+        symmetric: bool = True,
         distance_metric: str = 'jaccard',
         linkage_method: str = 'ward',
         optimal_ordering: bool = True,
@@ -126,34 +129,17 @@ def calculate_linkage_matrix_from_binary(
     pre_distance = traits_df[summary_df.index].astype('float').T  # False -> 0; NAN -> NAN, True -> 1
     pre_distance = ((pre_distance.fillna(0.5) * 2) - 1).astype('int')
 
-    # make symmetric: correlated and anti-correlated traits should cluster together.
-    # whether class=0 or class=1 is arbitrary. Calculate both possibilities, take minimum
-    d1 = cdist(pre_distance, pre_distance, metric=distance_metric)
-    d2 = cdist(pre_distance, 0 - pre_distance, metric=distance_metric)
-    distance_matrix = np.minimum(d1, d2) * 2  # multiply by 2 to make maximal distance 1 again
-    del d1, d2
-    distance_matrix = pd.DataFrame(distance_matrix, columns=pre_distance.index, index=pre_distance.index)
+    if symmetric:
+        # make symmetric: correlated and anti-correlated traits should cluster together.
+        # whether class=0 or class=1 is arbitrary. Calculate both possibilities, take minimum
+        d1 = cdist(pre_distance, pre_distance, metric=distance_metric)
+        d2 = cdist(pre_distance, 0 - pre_distance, metric=distance_metric)
+        distance_matrix = np.minimum(d1, d2) * 2  # multiply by 2 to make maximal distance 1 again
+        del d1, d2
+    else:
+        distance_matrix = cdist(pre_distance, pre_distance, metric=distance_metric)
 
-    # import matplotlib as mpl
-    # import matplotlib.pyplot as plt
-    # mpl.use('AGG')
-    #
-    # for method in ['single', 'complete', 'average', 'weighted', 'ward', 'centroid', 'median']:
-    #     linkage_matrix = hierarchy.linkage(
-    #         squareform(distance_matrix),
-    #         method=method,
-    #         optimal_ordering=optimal_ordering
-    #     )
-    #
-    #     plt.figure(figsize=(10, 40))
-    #     # plt.xscale('log')
-    #     plt.xscale('squareroot')
-    #     dendrogram = hierarchy.dendrogram(linkage_matrix, labels=distance_matrix.columns.values, orientation='right')
-    #     plt.xlabel('Log Distance')
-    #     plt.ylabel('Feature Names')
-    #     plt.title(f'Dendrogram {method=}')
-    #     plt.savefig(f'plots/sqrt_bin_{method}.png')
-    # exit(0)
+    distance_matrix = pd.DataFrame(distance_matrix, columns=pre_distance.index, index=pre_distance.index)
 
     # create linkage matrix for scipy.cluster.hierarchy.dendrogram
     linkage_matrix = hierarchy.linkage(
@@ -167,6 +153,7 @@ def calculate_linkage_matrix_from_binary(
 def calculate_linkage_matrix_from_numeric(
         summary_df: pd.DataFrame,
         traits_df: pd.DataFrame,
+        symmetric: bool = True,
         scale: bool = True,
         corr_method: str = 'pearson',
         linkage_method: str = 'ward',
@@ -179,34 +166,9 @@ def calculate_linkage_matrix_from_numeric(
         pre_corr = pd.DataFrame(sklearn_scale(pre_corr), index=pre_corr.index, columns=pre_corr.columns)
 
     correlation_matrix = pre_corr.corr(method=corr_method)
-
-    # metric = 'euclidean'
-    # d1 = cdist(pre_corr, pre_corr, metric=metric)
-    # d2 = cdist(pre_corr, 0 - pre_corr, metric=metric)
-    # distance_matrix = np.minimum(d1, d2) * 2  # multiply by 2 to make maximal distance 1 again
-    # del d1, d2
-    # distance_matrix = pd.DataFrame(distance_matrix, columns=pre_corr.index, index=pre_corr.index)
-
-    # import matplotlib as mpl
-    # import matplotlib.pyplot as plt
-    # mpl.use('AGG')
-    #
-    # for method in ['single', 'complete', 'average', 'weighted', 'ward', 'centroid', 'median']:
-    #     linkage_matrix = hierarchy.linkage(
-    #         correlation_matrix.values,
-    #         method=method,
-    #         optimal_ordering=optimal_ordering
-    #     )
-    #
-    #     plt.figure(figsize=(10, 40))
-    #     # plt.xscale('log')
-    #     plt.xscale('squareroot')
-    #     dendrogram = hierarchy.dendrogram(linkage_matrix, labels=correlation_matrix.columns.values, orientation='right')
-    #     plt.xlabel('Log Distance')
-    #     plt.ylabel('Feature Names')
-    #     plt.title(f'Dendrogram {method=}')
-    #     plt.savefig(f'plots/sqrt_num_{method}.png')
-    # exit(0)
+    if symmetric:
+        # make symmetric: correlated and anti-correlated traits should cluster together.
+        correlation_matrix = correlation_matrix.abs()
 
     linkage_matrix = hierarchy.linkage(
         correlation_matrix.values,
